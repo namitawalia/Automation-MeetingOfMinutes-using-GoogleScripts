@@ -1,0 +1,151 @@
+function processMinutesOfMeeting() {
+  // Get the active spreadsheet
+  var spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
+
+  // Get the main sheet (e.g., minutes of meeting)
+  var mainSheet = spreadsheet.getSheetByName("Main Sheet");
+
+  // Get the "POC" sheet (e.g., point of contact or email list)
+  var pocSheet = spreadsheet.getSheetByName("POC Sheet");
+
+  // Get the data sheet (e.g., tracking sheet or log)
+  var dataSheet = spreadsheet.getSheetByName("Tracking Sheet");
+
+  // Get the historical database or document sheet
+  var documentSheet = spreadsheet.getSheetByName("Document Sheet");
+
+  // Check if required sheets exist
+  if (!mainSheet || !pocSheet || !dataSheet || !documentSheet) {
+    Logger.log("Sheets not found");
+    return;
+  }
+
+  // Get the data from the main sheet (replace "B2:F" with relevant data range)
+  var data = mainSheet.getRange("B2:F" + mainSheet.getLastRow()).getValues();
+
+  // Check if there's any data to sort
+  if (data.length === 0) {
+    Logger.log("No data to process.");
+    return;
+  }
+
+  // Sort the data by column 1 (index 0) and then by column 2 (index 1)
+  data.sort(function(a, b) {
+    if (a[0] === b[0]) {
+      return a[1] > b[1] ? 1 : -1;
+    }
+    return a[0] > b[0] ? 1 : -1;
+  });
+
+  // Format the data in tabular form
+  var table =
+    "<table style='border-collapse: collapse; width: 100%; border: 1px solid #ddd;'>" +
+    "<tr style='background-color: #27ae60; color: #fff; font-weight: bold; text-align: left;'>" +
+    "<th style='padding: 10px; border: 1px solid #ddd;'> " + data[0].join("</th><th style='padding: 10px; border: 1px solid #ddd;'>") + "</th></tr>";
+
+  for (var i = 1; i < data.length; i++) {
+    var bgColor = i % 2 === 0 ? '#f2f2f2' : '#ffffff'; // Alternating row colors
+    table += "<tr style='background-color: " + bgColor + ";'>" +
+      "<td style='padding: 10px; border: 1px solid #ddd;'>" + data[i].join("</td><td style='padding: 10px; border: 1px solid #ddd;'>") + "</td></tr>";
+  }
+  table += "</table>";
+
+  // Get the email addresses from the "POC Sheet"
+  var emailAddresses = pocSheet.getRange("B1:B" + pocSheet.getLastRow()).getValues();
+
+  // Prepare an array to store email addresses
+  var toAddresses = [];
+
+  // Get the current increment number from the "Tracking Sheet"
+  var incrementCell = dataSheet.getRange("Z1"); // Assuming you store the number in cell Z1
+  var incrementNumber = incrementCell.getValue();
+  
+  if (!incrementNumber) {
+    incrementNumber = 10001; // Start at 10001 if it's the first time
+  }
+
+  // Increment the number for the next use
+  incrementCell.setValue(incrementNumber + 1);
+
+  // Format the increment number as a string with leading zeros
+  var incrementPrefix = "[MOM-" + ("00000" + incrementNumber).slice(-5) + "]";
+
+  // Compose the subject line based on D1 value
+  var valueB1 = mainSheet.getRange("B1").getValue();
+  var valueC1 = mainSheet.getRange("C1").getValue();
+  var valueD1 = mainSheet.getRange("D1").getValue();
+  var timestamp = new Date();
+  var formattedTimestamp = Utilities.formatDate(timestamp, "GMT", "MMM dd, yyyy"); // Unique timestamp
+
+  var subject = "";
+
+  if (valueD1 === "Weekly Call") {
+    subject = incrementPrefix + " | Weekly Pricing Review: " + valueB1 + " (" + valueC1 + ") | " + formattedTimestamp;
+  } else if (valueD1 === "Other Call") {
+    subject = incrementPrefix + " | " + valueB1 + " (" + valueC1 + ") | " + formattedTimestamp;
+  } else {
+    subject = incrementPrefix + " | " + valueB1 + " , " + valueC1 + " ) | " + formattedTimestamp;
+  }
+
+  // Compose the email body
+  var body = "Hi Team,<br><br>Please find below the MOM.<br><br>" + table + "<br><br>" + 
+             "Please acknowledge the actionable and let us know in case of any issue or discrepancy.";
+
+  // Send the email to each address
+  for (var j = 0; j < emailAddresses.length; j++) {
+    var recipient = emailAddresses[j][0];
+    toAddresses.push(recipient);
+  }
+
+  // Convert the array of email addresses to a comma-separated string
+  var toAddressesString = toAddresses.join(',');
+
+  // Send the email with all recipients in the "to" field
+  MailApp.sendEmail({
+    to: toAddressesString,
+    subject: subject,
+    htmlBody: body,
+  });
+
+  // Log the email addresses to which the email is sent
+  Logger.log("Emails sent to: " + toAddressesString);
+
+  // Get the email address of the user running the script
+  var userEmail = Session.getActiveUser().getEmail();
+
+  // Save the email details in the "Tracking Sheet"
+  var lastRowData = dataSheet.getLastRow() + 1;
+  dataSheet.getRange(lastRowData, 1).setValue(timestamp);
+  dataSheet.getRange(lastRowData, 2).setValue(subject);
+  dataSheet.getRange(lastRowData, 3).setValue(userEmail);
+
+  // Get the data from "Main Sheet"
+  var mainData = mainSheet.getRange("A3:F" + mainSheet.getLastRow()).getValues();
+
+  // Check if there is data in the "Main Sheet" before proceeding
+  if (mainData.length > 0 && mainData[0].join('') !== '') {
+    // Sort the main data by column 1 (index 0) and then by column 2 (index 1)
+    mainData.sort(function(a, b) {
+      if (a[1] === b[1]) {
+        return a[2] > b[2] ? 1 : -1;
+      }
+      return a[1] > b[1] ? 1 : -1;
+    });
+
+    // Append data to "Document Sheet" and add timestamp, subject, and user email
+    for (var i = 0; i < mainData.length; i++) {
+      mainData[i].push(timestamp, subject, userEmail);
+    }
+    documentSheet.getRange(documentSheet.getLastRow() + 1, 1, mainData.length, mainData[0].length).setValues(mainData);
+
+    // Clear only content (surface values) in "Main Sheet"
+    var rangeToClear = mainSheet.getRange("A3:F" + (mainSheet.getLastRow() + 1));
+    var formulas = rangeToClear.getFormulas(); // Get formulas before clearing
+    rangeToClear.clearContent(); // Clear only values
+    rangeToClear.setFormulas(formulas); // Set back the formulas
+
+    Logger.log("Data saved to 'Document Sheet' and 'Main Sheet' values reset with timestamp, subject, and user email.");
+  } else {
+    Logger.log("No data in 'Main Sheet' to save.");
+  }
+}
